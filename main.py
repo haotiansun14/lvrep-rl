@@ -1,6 +1,7 @@
 import numpy as np
 import torch
-import gym
+# import gym
+import gymnasium as gym
 import argparse
 import os
 
@@ -15,11 +16,11 @@ if __name__ == "__main__":
 	
   parser = argparse.ArgumentParser()
   parser.add_argument("--dir", default=0, type=int)                     
-  parser.add_argument("--alg", default="sac")                     # Alg name (sac, vlsac)
-  parser.add_argument("--env", default="HalfCheetah-v3")          # Environment name
+  parser.add_argument("--alg", default="vlsac")                     # Alg name (sac, vlsac)
+  parser.add_argument("--env", default="HalfCheetah-v4")          # Environment name
   parser.add_argument("--seed", default=0, type=int)              # Sets Gym, PyTorch and Numpy seeds
-  parser.add_argument("--start_timesteps", default=25e3, type=float)# Time steps initial random policy is used
-  parser.add_argument("--eval_freq", default=5e3, type=int)       # How often (time steps) we evaluate
+  parser.add_argument("--start_timesteps", default=25e3, type=float)# 25e3 Time steps initial random policy is used
+  parser.add_argument("--eval_freq", default=5e3, type=int)       # 5e3 How often (time steps) we evaluate
   parser.add_argument("--max_timesteps", default=1e6, type=float)   # Max time steps to run environment
   parser.add_argument("--expl_noise", default=0.1)                # Std of Gaussian exploration noise
   parser.add_argument("--batch_size", default=256, type=int)      # Batch size for both actor and critic
@@ -34,13 +35,14 @@ if __name__ == "__main__":
 
   env = gym.make(args.env)
   eval_env = gym.make(args.env)
-  env.seed(args.seed)
-  eval_env.seed(args.seed)
+  env.reset(seed=args.seed)
+  eval_env.reset(seed=args.seed)
   max_length = env._max_episode_steps
-
+  print(f"Max length: {max_length}")
   # setup log 
   log_path = f'log/{args.env}/{args.alg}/{args.dir}/{args.seed}'
   summary_writer = SummaryWriter(log_path)
+  # summary_writer = SummaryWriter()
 
   # set seeds
   torch.manual_seed(args.seed)
@@ -73,14 +75,15 @@ if __name__ == "__main__":
   # Evaluate untrained policy
   evaluations = [util.eval_policy(agent, eval_env)]
 
-  state, done = env.reset(), False
+  state, done = env.reset()[0], False
   episode_reward = 0
   episode_timesteps = 0
   episode_num = 0
   timer = util.Timer()
 
+  print(f"Start training. Alg: {args.alg}. Env: {args.env}. Seed: {args.seed}.")
   for t in range(int(args.max_timesteps)):
-    
+    # print(f"Step {t+1}.")
     episode_timesteps += 1
 
     # Select action randomly or according to policy
@@ -90,7 +93,9 @@ if __name__ == "__main__":
       action = agent.select_action(state, explore=True)
 
     # Perform action
-    next_state, reward, done, _ = env.step(action) 
+    # next_state, reward, done, _ = env.step(action) 
+    next_state, reward, terminated, truncated, _ = env.step(action)
+    done = terminated or truncated
     done_bool = float(done) if episode_timesteps < max_length else 0
 
     # Store data in replay buffer
@@ -107,7 +112,7 @@ if __name__ == "__main__":
       # +1 to account for 0 indexing. +0 on ep_timesteps since it will increment +1 even if done=True
       print(f"Total T: {t+1} Episode Num: {episode_num+1} Episode T: {episode_timesteps} Reward: {episode_reward:.3f}")
       # Reset environment
-      state, done = env.reset(), False
+      state, done = env.reset()[0], False
       episode_reward = 0
       episode_timesteps = 0
       episode_num += 1 

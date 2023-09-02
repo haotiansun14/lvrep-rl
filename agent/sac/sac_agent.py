@@ -68,17 +68,11 @@ class SACAgent(object):
 		self.target_entropy = -action_dim
 		
 		 # optimizers
-		self.actor_optimizer = torch.optim.Adam(self.actor.parameters(),
-																						lr=lr,
-																						betas=[0.9, 0.999])
+		self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=lr, betas=[0.9, 0.999])
 
-		self.critic_optimizer = torch.optim.Adam(self.critic.parameters(),
-																							lr=lr,
-																							betas=[0.9, 0.999])
+		self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr, betas=[0.9, 0.999])
 
-		self.log_alpha_optimizer = torch.optim.Adam([self.log_alpha],
-																								lr=lr,
-																								betas=[0.9, 0.999])
+		self.log_alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=lr, betas=[0.9, 0.999])
 
 
 	@property
@@ -113,8 +107,7 @@ class SACAgent(object):
 		next_action = dist.rsample()
 		log_prob = dist.log_prob(next_action).sum(-1, keepdim=True)
 		target_Q1, target_Q2 = self.critic_target(next_obs, next_action)
-		target_V = torch.min(target_Q1,
-													target_Q2) - self.alpha.detach() * log_prob
+		target_V = torch.min(target_Q1, target_Q2) - self.alpha.detach() * log_prob
 		target_Q = reward + (not_done * self.discount * target_V)
 		target_Q = target_Q.detach()
 

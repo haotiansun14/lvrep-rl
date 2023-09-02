@@ -1,5 +1,6 @@
 import time
-import gym 
+# import gym 
+import gymnasium as gym
 import numpy as np 
 import torch
 
@@ -43,11 +44,15 @@ def eval_policy(policy, eval_env, eval_episodes=10):
 	"""
 	avg_reward = 0.
 	for _ in range(eval_episodes):
-		state, done = eval_env.reset(), False
+		state, done = eval_env.reset()[0], False
 		while not done:
 			action = policy.select_action(np.array(state))
-			state, reward, done, _ = eval_env.step(action)
+			# print(eval_env.step(action))
+			# state, reward, done, _ = eval_env.step(action)
+			state, reward, terminated, truncated, _ = eval_env.step(action)
+			done = terminated or truncated
 			avg_reward += reward
+			# print(f"reward: {reward, avg_reward}")
 
 	avg_reward /= eval_episodes
 
