@@ -73,11 +73,11 @@ def weight_init(m):
 
 class MLP(nn.Module):
 	def __init__(self,
-								input_dim,
-								hidden_dim,
-								output_dim,
-								hidden_depth,
-								output_mod=None):
+				input_dim,
+				hidden_dim,
+				output_dim,
+				hidden_depth,
+				output_mod=None):
 		super().__init__()
 		self.trunk = mlp(input_dim, hidden_dim, output_dim, hidden_depth,
 											output_mod)

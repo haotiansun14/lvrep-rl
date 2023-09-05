@@ -113,8 +113,7 @@ class SACAgent(object):
 
 		# get current Q estimates
 		current_Q1, current_Q2 = self.critic(obs, action)
-		critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(
-				current_Q2, target_Q)
+		critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
 
 		# Optimize the critic
 		self.critic_optimizer.zero_grad()
@@ -148,8 +147,7 @@ class SACAgent(object):
 
 		if self.learnable_temperature:
 			self.log_alpha_optimizer.zero_grad()
-			alpha_loss = (self.alpha *
-										(-log_prob - self.target_entropy).detach()).mean()
+			alpha_loss = (self.alpha * (-log_prob - self.target_entropy).detach()).mean()
 			alpha_loss.backward()
 			self.log_alpha_optimizer.step()
 
@@ -166,7 +164,7 @@ class SACAgent(object):
 		self.steps += 1
 
 		batch = buffer.sample(batch_size)
-		# Acritic step
+		# Critic step
 		critic_info = self.critic_step(batch)
 
 		# Actor and alpha step

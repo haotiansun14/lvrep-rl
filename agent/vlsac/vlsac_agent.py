@@ -28,8 +28,7 @@ class Critic(nn.Module):
 
 		super().__init__()
 		self.num_noise = num_noise
-		self.noise = torch.randn(
-			[self.num_noise, feature_dim], requires_grad=False, device=device)
+		self.noise = torch.randn([self.num_noise, feature_dim], requires_grad=False, device=device)
 
 		# Q1
 		self.l1 = nn.Linear(feature_dim, hidden_dim) # random feature
@@ -51,6 +50,9 @@ class Critic(nn.Module):
 		x = mean[:, None, :] + std[:, None, :] * self.noise
 		x = x.reshape(-1, d)
 
+		# mean: torch.Size([256, 256]), log_std: torch.Size([256, 256]), x: torch.Size([5120, 256])
+		# print(f"mean: {mean.shape}, log_std: {log_std.shape}, x: {x.shape}") 
+
 		q1 = F.elu(self.l1(x)) #F.relu(self.l1(x))
 		q1 = q1.reshape([batch_size, self.num_noise, -1]).mean(dim=1)
 		q1 = F.elu(self.l2(q1)) #F.relu(self.l2(q1))
@@ -61,6 +63,8 @@ class Critic(nn.Module):
 		q2 = F.elu(self.l5(q2)) #F.relu(self.l5(q2))
 		q2 = self.l3(q2)
 
+		#q1: torch.Size([256, 1]), q2: torch.Size([256, 1])
+		# print(f"q1: {q1.shape}, q2: {q2.shape}") 
 		return q1, q2
 
 
@@ -117,11 +121,10 @@ class VLSACAgent(SACAgent):
 		self.feature_optimizer = torch.optim.Adam(
 			list(self.encoder.parameters()) + list(self.decoder.parameters()) + list(self.f.parameters()),
 			lr=lr)
-
+		# print(f'param sizes: {[x.size() for x in list(self.encoder.parameters())]}')
 		self.critic = Critic(feature_dim=feature_dim, hidden_dim=hidden_dim).to(device)
 		self.critic_target = copy.deepcopy(self.critic)
-		self.critic_optimizer = torch.optim.Adam(
-			self.critic.parameters(), lr=lr, betas=[0.9, 0.999])
+		self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr, betas=[0.9, 0.999])
 
 
 	def feature_step(self, batch):
@@ -139,16 +142,21 @@ class VLSACAgent(SACAgent):
 		s_loss = 0.5 * F.mse_loss(x, batch.next_state)
 		r_loss = 0.5 * F.mse_loss(r, batch.reward)
 		ml_loss = r_loss + s_loss
+		# z: torch.Size([256, 256]), x: torch.Size([256, 17]), r: torch.Size([256, 1]), s_loss: torch.Size([]), r_loss: torch.Size([]), ml_loss: torch.Size([])
+		# print(f"z: {z.shape}, x: {x.shape}, r: {r.shape}, s_loss: {s_loss.shape}, r_loss: {r_loss.shape}, ml_loss: {ml_loss.shape}")
 
 		# KL loss
-		mean1, log_std1 = self.encoder(
-			batch.state, batch.action, batch.next_state)
+		mean1, log_std1 = self.encoder(batch.state, batch.action, batch.next_state)
 		mean2, log_std2 = self.f(batch.state, batch.action)
 		var1 = (2 * log_std1).exp()
 		var2 = (2 * log_std2).exp()
 		kl_loss = log_std2 - log_std1 + 0.5 * (var1 + (mean1-mean2)**2) / var2 - 0.5
 		
 		loss = (ml_loss + kl_loss).mean()
+
+		# ml_loss: torch.Size([]), kl_loss: torch.Size([256, 256]), loss: torch.Size([])
+		# print(f"ml_loss: {ml_loss.shape}, kl_loss: {kl_loss.shape}, loss: {loss.shape}")
+
 
 		self.feature_optimizer.zero_grad()
 		loss.backward()
@@ -188,8 +196,7 @@ class VLSACAgent(SACAgent):
 
 		if self.learnable_temperature:
 			self.log_alpha_optimizer.zero_grad()
-			alpha_loss = (self.alpha *
-										(-log_prob - self.target_entropy).detach()).mean()
+			alpha_loss = (self.alpha * (-log_prob - self.target_entropy).detach()).mean()
 			alpha_loss.backward()
 			self.log_alpha_optimizer.step()
 
@@ -258,7 +265,7 @@ class VLSACAgent(SACAgent):
 			if self.use_feature_target:
 				self.update_feature_target()
 
-		# Acritic step
+		# Critic step
 		critic_info = self.critic_step(batch)
 
 		# Actor and alpha step

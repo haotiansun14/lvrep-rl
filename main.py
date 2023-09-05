@@ -53,6 +53,8 @@ if __name__ == "__main__":
   action_dim = env.action_space.shape[0] 
   max_action = float(env.action_space.high[0])
 
+  print(f"State dim: {env.observation_space}. Action dim: {env.action_space}. Max action: {max_action}. Reward range: {env.reward_range}, Spec: {env.spec}, Metadata: {env.metadata}")
+
   kwargs = {
     "state_dim": state_dim,
     "action_dim": action_dim,
@@ -61,6 +63,7 @@ if __name__ == "__main__":
     "tau": args.tau,
     "hidden_dim": args.hidden_dim,
   }
+  print(f"kwargs: {kwargs}")
 
   # Initialize policy
   if args.alg == "sac":

@@ -54,6 +54,9 @@ class Encoder(nn.Module):
     std = log_std.exp()
     normal = Normal(mean, std)
     z = normal.rsample() # reparameterization
+
+    # print(f"mean: {mean.shape}, log_std: {log_std.shape}, z: {z.shape}")
+    # mean: torch.Size([256, 256]), log_std: torch.Size([256, 256]), z: torch.Size([256, 256])
     return z 
 
 
