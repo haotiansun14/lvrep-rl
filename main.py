@@ -10,13 +10,16 @@ from tensorboardX import SummaryWriter
 from utils import util, buffer
 from agent.sac import sac_agent
 from agent.vlsac import vlsac_agent
+from agent.vlsac import speder_agent
 
+import warnings
+warnings.simplefilter('ignore')
 
 if __name__ == "__main__":
 	
   parser = argparse.ArgumentParser()
   parser.add_argument("--dir", default=0, type=int)                     
-  parser.add_argument("--alg", default="vlsac")                     # Alg name (sac, vlsac)
+  parser.add_argument("--alg", default="spedersac")                     # Alg name (sac, vlsac, spedersac)
   parser.add_argument("--env", default="HalfCheetah-v4")          # Environment name
   parser.add_argument("--seed", default=0, type=int)              # Sets Gym, PyTorch and Numpy seeds
   parser.add_argument("--start_timesteps", default=25e3, type=float)# 25e3 Time steps initial random policy is used
@@ -53,6 +56,7 @@ if __name__ == "__main__":
   action_dim = env.action_space.shape[0] 
   max_action = float(env.action_space.high[0])
 
+  print(f"Algo: {args.alg}. Env: {args.env}. Seed: {args.seed}.")
   print(f"State dim: {env.observation_space}. Action dim: {env.action_space}. Max action: {max_action}. Reward range: {env.reward_range}, Spec: {env.spec}, Metadata: {env.metadata}")
 
   kwargs = {
@@ -63,7 +67,6 @@ if __name__ == "__main__":
     "tau": args.tau,
     "hidden_dim": args.hidden_dim,
   }
-  print(f"kwargs: {kwargs}")
 
   # Initialize policy
   if args.alg == "sac":
@@ -72,7 +75,14 @@ if __name__ == "__main__":
     kwargs['extra_feature_steps'] = args.extra_feature_steps
     kwargs['feature_dim'] = args.feature_dim
     agent = vlsac_agent.VLSACAgent(**kwargs)
+  elif args.alg == 'spedersac':
+    kwargs['extra_feature_steps'] = args.extra_feature_steps
+    kwargs['feature_dim'] = 1024  
+    kwargs['hidden_dim'] = 1024
+    agent = speder_agent.SPEDER_SACAgent(**kwargs)
   
+  print(f"kwargs: {kwargs}")
+
   replay_buffer = buffer.ReplayBuffer(state_dim, action_dim)
 
   # Evaluate untrained policy

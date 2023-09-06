@@ -1,7 +1,7 @@
 import collections
 import numpy as np
 import torch
-
+import torch.distributions as pyd
 
 
 Batch = collections.namedtuple(
@@ -38,7 +38,6 @@ class ReplayBuffer(object):
 
 	def sample(self, batch_size):
 		ind = np.random.randint(0, self.size, size=batch_size)
-
 		return Batch(
 			state=torch.FloatTensor(self.state[ind]).to(self.device),
 			action=torch.FloatTensor(self.action[ind]).to(self.device),
@@ -46,6 +45,32 @@ class ReplayBuffer(object):
 			reward=torch.FloatTensor(self.reward[ind]).to(self.device),
 			done=torch.FloatTensor(self.done[ind]).to(self.device),
 		)
+	
+	def retrieve_all(self):
+		return Batch(
+			state=torch.FloatTensor(self.state[:self.size]).to(self.device),
+			action=torch.FloatTensor(self.action[:self.size]).to(self.device),
+			next_state=torch.FloatTensor(self.next_state[:self.size]).to(self.device),
+			reward=torch.FloatTensor(self.reward[:self.size]).to(self.device),
+			done=torch.FloatTensor(self.done[:self.size]).to(self.device),
+		)
 
+class D_base(object):
+	def __init__(self, state_dim, K=int(1e4)):
+		self.K = K
+		self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+		mu_s = torch.zeros(state_dim).to(self.device)
+		cov_s = torch.eye(state_dim).to(self.device) 
+		self.base_measure = pyd.MultivariateNormal(loc=mu_s, covariance_matrix=cov_s)
+		
+		# sampling
+		self.state = self.base_measure.sample((self.K,)).to(self.device)
+		self.prob = self.base_measure.log_prob(self.state).to(self.device)
+
+	def base_prob(self, state):
+		return self.base_measure.log_prob(state).exp().to(self.device)
+
+	def state_and_prob(self):
+		return self.state, self.prob
 
