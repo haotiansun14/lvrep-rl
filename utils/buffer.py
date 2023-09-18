@@ -46,30 +46,11 @@ class ReplayBuffer(object):
 			done=torch.FloatTensor(self.done[ind]).to(self.device),
 		)
 	
-	def all_samples(self):
-		return Batch(
-			state=torch.FloatTensor(self.state[:self.size]).to(self.device),
-			action=torch.FloatTensor(self.action[:self.size]).to(self.device),
-			next_state=torch.FloatTensor(self.next_state[:self.size]).to(self.device),
-			reward=torch.FloatTensor(self.reward[:self.size]).to(self.device),
-			done=torch.FloatTensor(self.done[:self.size]).to(self.device),
-		)
-
-class D_base(object):
-	def __init__(self, state_dim, K=int(256)):
-		self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-		self.K = K
-
-		mu_s = torch.zeros(state_dim).to(self.device)
-		cov_s = torch.eye(state_dim).to(self.device) 
-		self.base_measure = pyd.MultivariateNormal(loc=mu_s, covariance_matrix=cov_s)
-		
-		# sampling
-		self.state = self.base_measure.rsample(torch.Size((K,))).to(self.device)
-		self.prob = self.base_measure.log_prob(self.state).exp().to(self.device)
-
-	def get_base_prob(self, state):
-		return self.base_measure.log_prob(state).exp().to(self.device)
-
-	def state_and_prob(self):
-		return self.state, self.prob
+	# def all_samples(self):
+	# 	return Batch(
+	# 		state=torch.FloatTensor(self.state[:self.size]).to(self.device),
+	# 		action=torch.FloatTensor(self.action[:self.size]).to(self.device),
+	# 		next_state=torch.FloatTensor(self.next_state[:self.size]).to(self.device),
+	# 		reward=torch.FloatTensor(self.reward[:self.size]).to(self.device),
+	# 		done=torch.FloatTensor(self.done[:self.size]).to(self.device),
+	# 	)

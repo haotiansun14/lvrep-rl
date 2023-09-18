@@ -5,12 +5,15 @@ import gymnasium as gym
 import argparse
 import os
 
+from datetime import datetime
+
 from tensorboardX import SummaryWriter
 
 from utils import util, buffer
 from agent.sac import sac_agent
-from agent.vlsac import vlsac_agent
-from agent.vlsac import speder_agent
+from agent.vlsac import ctrl_agent, vlsac_agent, speder_agent
+
+eps_greedy = 0.01
 
 import warnings
 warnings.simplefilter('ignore')
@@ -19,7 +22,7 @@ if __name__ == "__main__":
 	
   parser = argparse.ArgumentParser()
   parser.add_argument("--dir", default=0, type=int)                     
-  parser.add_argument("--alg", default="spedersac")                     # Alg name (sac, vlsac, spedersac)
+  parser.add_argument("--alg", default="ctrlsac")                     # Alg name (sac, vlsac, spedersac, ctrlsac)
   parser.add_argument("--env", default="HalfCheetah-v4")          # Environment name
   parser.add_argument("--seed", default=0, type=int)              # Sets Gym, PyTorch and Numpy seeds
   parser.add_argument("--start_timesteps", default=25e3, type=float)# 25e3 Time steps initial random policy is used
@@ -43,9 +46,9 @@ if __name__ == "__main__":
   max_length = env._max_episode_steps
   print(f"Max length: {max_length}")
   # setup log 
-  log_path = f'log/{args.env}/{args.alg}/{args.dir}/{args.seed}'
+  log_path = f'log/{args.env}/{args.alg}/{args.seed}/{datetime.now().strftime("%D-%H:%M")}'
   summary_writer = SummaryWriter(log_path)
-  # summary_writer = SummaryWriter()
+
 
   # set seeds
   torch.manual_seed(args.seed)
@@ -80,6 +83,11 @@ if __name__ == "__main__":
     kwargs['feature_dim'] = 1024  
     kwargs['hidden_dim'] = 1024
     agent = speder_agent.SPEDER_SACAgent(**kwargs)
+  elif args.alg == 'ctrlsac':
+    kwargs['extra_feature_steps'] = True
+    kwargs['feature_dim'] = 2048 # 2048  
+    kwargs['hidden_dim'] = 1024
+    agent = ctrl_agent.CTRL_SACAgent(**kwargs)
   
   print(f"kwargs: {kwargs}")
 
@@ -103,7 +111,11 @@ if __name__ == "__main__":
     if t < args.start_timesteps:
       action = env.action_space.sample()
     else:
-      action = agent.select_action(state, explore=True)
+      # epsilon greedy
+      if np.random.uniform(0, 1) < eps_greedy:
+        action = env.action_space.sample()
+      else:
+        action = agent.select_action(state, explore=True)
 
     # Perform action
     # next_state, reward, done, _ = env.step(action) 
@@ -119,7 +131,8 @@ if __name__ == "__main__":
     
     # Train agent after collecting sufficient data
     if t >= args.start_timesteps:
-      info = agent.train(replay_buffer, batch_size=args.batch_size)
+      info = agent.train(replay_buffer, batch_size=args.batch_size) 
+      # info = agent.train(replay_buffer, batch_size=512) 
 
     if done: 
       # +1 to account for 0 indexing. +0 on ep_timesteps since it will increment +1 even if done=True

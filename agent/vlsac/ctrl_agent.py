@@ -72,8 +72,8 @@ class Phi(nn.Module):
 
 	def forward(self, state, action):
 		x = torch.cat([state, action], axis=-1)
-		z = F.relu(self.l1(x)) 
-		z = F.relu(self.l2(z)) 
+		z = F.elu(self.l1(x)) 
+		z = F.elu(self.l2(z)) 
 		z_phi = self.l3(z)
 		return z_phi
 
@@ -96,11 +96,11 @@ class Mu(nn.Module):
 		self.l3 = nn.Linear(hidden_dim, feature_dim)
 
 	def forward(self, state):
-		z = F.relu(self.l1(state))
-		z = F.relu(self.l2(z)) 
+		z = F.elu(self.l1(state))
+		z = F.elu(self.l2(z)) 
 		# bounded mu's output
-		# z_mu = F.tanh(self.l3(z)) 
-		z_mu = self.l3(z)
+		z_mu = F.tanh(self.l3(z)) 
+		# z_mu = self.l3(z)
 		return z_mu
 
 class Theta(nn.Module):
@@ -122,7 +122,7 @@ class Theta(nn.Module):
 		return r
 
 
-class SPEDER_SACAgent(SACAgent):
+class CTRL_SACAgent(SACAgent):
 	"""
 	SAC with VAE learned latent features
 	"""
@@ -131,7 +131,7 @@ class SPEDER_SACAgent(SACAgent):
 			state_dim, 
 			action_dim, 
 			action_space, 
-			lr=3e-4,
+			lr=1e-4, #3
 			discount=0.99, 
 			target_update_period=2,
 			tau=0.005,
@@ -139,9 +139,9 @@ class SPEDER_SACAgent(SACAgent):
 			auto_entropy_tuning=True,
 			hidden_dim=1024,
 			feature_tau=0.005,
-			feature_dim=1024, # latent feature dim
+			feature_dim=2048, # latent feature dim
 			use_feature_target=True, 
-			extra_feature_steps=1,
+			extra_feature_steps=1, #1
 			):
 
 		super().__init__(
@@ -172,32 +172,47 @@ class SPEDER_SACAgent(SACAgent):
 		self.mu = Mu(state_dim=state_dim,
 			   	feature_dim=feature_dim, 
 				hidden_dim=hidden_dim).to(device)
-		# if use_feature_target:
-		# 	self.mu_target = copy.deepcopy(self.mu)
 
-		# self.theta = Theta(feature_dim=feature_dim).to(device)
+		self.theta = Theta(feature_dim=feature_dim).to(device)
 
 		self.feature_optimizer = torch.optim.Adam(
-			list(self.phi.parameters()) + list(self.mu.parameters()),
-			lr=lr)
+			list(self.phi.parameters()) + list(self.mu.parameters()) + list(self.theta.parameters()),
+			weight_decay=0, lr=lr)
+		
+		# frozen phi
+		self.frozen_phi = Phi(state_dim=state_dim, 
+				 action_dim=action_dim, 
+				 feature_dim=feature_dim, 
+				 hidden_dim=hidden_dim).to(device)
+		if use_feature_target:
+			self.frozen_phi_target = copy.deepcopy(self.frozen_phi)
 
 		self.actor = DiagGaussianActor(
 			obs_dim=state_dim, 
 			action_dim=action_dim,
 			hidden_dim=256,
-			hidden_depth=1,
+			hidden_depth=2,
 			log_std_bounds=[-5., 2.], 
 		).to(self.device)
+		self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), 
+										  weight_decay=0, lr=lr/3, betas=[0.9, 0.999]) # wd 1e-3
+		self.log_alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=lr/3, betas=[0.9, 0.999])
+		
+		# lr decay
+		# self.actor_scheduler = torch.optim.lr_scheduler.StepLR(self.actor_optimizer, step_size=20 * 5e3, gamma=0.5)
+		# self.alpha_scheduler = torch.optim.lr_scheduler.StepLR(self.log_alpha_optimizer, step_size=20 *5e3, gamma=0.5)
+
 
 		self.critic = Critic(feature_dim=feature_dim, hidden_dim=hidden_dim).to(device)
 		self.critic_target = copy.deepcopy(self.critic)
-		self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=lr, betas=[0.9, 0.999])
+		self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), 
+										   weight_decay=0, lr=lr, betas=[0.9, 0.999])
 
 		# print network summary
 		batch_size = 256
 		summary(self.phi, input_size=[(batch_size, state_dim), (batch_size, action_dim)])
 		summary(self.mu, input_size=(batch_size, state_dim))
-		# summary(self.theta, input_size=(batch_size, feature_dim))
+		summary(self.theta, input_size=(batch_size, feature_dim))
 		summary(self.critic, input_size=(batch_size, feature_dim))
 
 
@@ -207,31 +222,38 @@ class SPEDER_SACAgent(SACAgent):
 		"""
 		state, action, next_state, reward, _ = unpack_batch(batch)
 
-		C = 1
-
 		z_phi = self.phi(state, action)
 
 		z_mu_next = self.mu(next_state)
 
-		# second term
-		loss1 = - 2 * einsum('bi,bj->b', z_phi, z_mu_next).mean()
+		assert z_phi.shape[-1] == self.feature_dim
+		assert z_mu_next.shape[-1] == self.feature_dim
 
-		# third term
-		loss2_1 = einsum('bi,bj->bij', z_phi, z_phi) 
-		loss2_2 = einsum('bi,bj->bij', z_mu_next, z_mu_next)
-		loss2 = einsum('bij,bjq->biq', loss2_1, loss2_2)
-		loss2 = einsum('bii->b', loss2).sum()
+	## 	pytorch implementation of the following tf code
+	# 	logits = tf.reduce_sum(tf.expand_dims(sa_embed, axis=1) * tf.expand_dims(s_embed, axis=0), axis=-1)
+    #   labels = tf.eye(s1.shape[0])
+    #   ce_loss = tf.nn.softmax_cross_entropy_with_logits(labels=labels, logits=logits)
+    #   model_losses.append(tf.reduce_mean(ce_loss))
 
-		# r1 = self.theta(z_phi)
-		# loss_r = F.mse_loss(r1, reward).mean()
+		labels = torch.eye(state.shape[0]).to(device)
+		# model_loss = einsum('id,jd->ij', z_phi, z_mu_next)
 
-		# prob loss
-		# as per CTRL, this should be done for all data points throughout the training period.
-		# z_phi: B x d, z_mu_base: K x d
-		loss_prob = torch.mm(z_phi, z_mu_next.t()).mean(dim=1).clamp(min=1e-4)
-		loss_prob = loss_prob.log().square().mean()  
+		contrastive = (z_phi[:, None, :] * z_mu_next[None, :, :]).sum(-1) #/ 0.2
+		# model_loss = F.cross_entropy(model_loss, labels)
+		# model_loss = model_loss.mean()
 
-		loss = C + loss1 + loss2 + loss_prob # C for decoration purposes only
+		model_loss = nn.CrossEntropyLoss()
+		model_loss = model_loss(contrastive, labels)
+
+		r_loss = 0.5 * F.mse_loss(self.theta(z_phi), reward).mean()
+
+		# probability density constraint
+		# not used, seems to be unstable
+		# prob_loss = torch.mm(z_phi, z_mu_next.t()).mean(dim=1)
+		# prob_loss = (z_phi * z_mu_next).sum(-1).clamp(min=1e-4)
+		# prob_loss = prob_loss.log().square().mean()  
+
+		loss = model_loss + r_loss # + prob_loss
 
 		self.feature_optimizer.zero_grad()
 		loss.backward()
@@ -239,17 +261,14 @@ class SPEDER_SACAgent(SACAgent):
 
 		return {
 			'total_loss': loss.item(),
-			'loss1': loss1.mean().item(),
-			# 'loss_r': loss_r.mean().item(),
-			'loss2': loss2.mean().item(),
-			'loss_prob': loss_prob.mean().item(),
+			'model_loss': model_loss.item(),
+			'r_loss': r_loss.item(),
+			# 'prob_loss': prob_loss.item(),
 		}
 
 	def update_feature_target(self):
 		for param, target_param in zip(self.phi.parameters(), self.phi_target.parameters()):
 			target_param.data.copy_(self.feature_tau * param.data + (1 - self.feature_tau) * target_param.data)
-		# for param, target_param in zip(self.mu.parameters(), self.mu_target.parameters()):
-		# 	target_param.data.copy_(self.feature_tau * param.data + (1 - self.feature_tau) * target_param.data)
 
 	def critic_step(self, batch):
 		"""
@@ -263,13 +282,13 @@ class SPEDER_SACAgent(SACAgent):
 			next_action_log_pi = dist.log_prob(next_action).sum(-1, keepdim=True)
 
 			if self.use_feature_target:
-				z_phi = self.phi_target(state, action)
-				z_phi_p = self.phi_target(next_state, next_action)
+				z_phi = self.frozen_phi_target(state, action)
+				z_phi_next = self.frozen_phi_target(next_state, next_action)
 			else:
-				z_phi = self.phi(state, action)
-				z_phi_p = self.phi(next_state, next_action)
+				z_phi = self.frozen_phi(state, action)
+				z_phi_next = self.frozen_phi(next_state, next_action)
 
-			next_q1, next_q2 = self.critic_target(z_phi_p)
+			next_q1, next_q2 = self.critic_target(z_phi_next)
 			next_q = torch.min(next_q1, next_q2) - self.alpha * next_action_log_pi
 			target_q = reward + (1. - done) * self.discount * next_q 
 			
@@ -297,10 +316,12 @@ class SPEDER_SACAgent(SACAgent):
 		action = dist.rsample()
 		log_prob = dist.log_prob(action).sum(-1, keepdim=True)
 
-		if self.use_feature_target:
-			z_phi = self.phi_target(batch.state, action)
-		else:
-			z_phi = self.phi(batch.state, action)
+		# if self.use_feature_target:
+		# 	z_phi = self.frozen_phi_target(batch.state, action)
+		# else:
+		# 	z_phi = self.frozen_phi(batch.state, action)
+		z_phi = self.frozen_phi(batch.state, action)
+
 		q1, q2 = self.critic(z_phi)
 		q = torch.min(q1, q2)
 
@@ -309,6 +330,10 @@ class SPEDER_SACAgent(SACAgent):
 		self.actor_optimizer.zero_grad()
 		actor_loss.backward()
 		self.actor_optimizer.step()
+
+		# cosine restart: tested and seemed not helpful.
+		# self.actor_scheduler.step()
+		# self.alpha_scheduler.step()
 
 		info = {'actor_loss': actor_loss.item()}
 
@@ -339,7 +364,16 @@ class SPEDER_SACAgent(SACAgent):
 			if self.use_feature_target:
 				self.update_feature_target()
 
-		# print(f"feature_info: {feature_info}")
+		# copy phi to frozen phi
+		self.frozen_phi.load_state_dict(self.phi.state_dict().copy())
+		if self.use_feature_target:
+			self.frozen_phi_target.load_state_dict(self.phi.state_dict().copy())
+
+		# for param, target_param in zip(self.phi.parameters(), self.frozen_phi.parameters()):
+		# 	target_param.data.copy_(param.data)
+		# if self.use_feature_target:
+		# 	for param, target_param in zip(self.phi.parameters(), self.frozen_phi_target.parameters()):
+		# 		target_param.data.copy_(param.data)
 
 		# Critic step
 		critic_info = self.critic_step(batch)
